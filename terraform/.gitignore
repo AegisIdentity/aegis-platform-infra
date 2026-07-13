@@ -1,0 +1,8 @@
+# Terraform local state and caches — never commit
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+!example.tfvars
+# Keep the dependency lock file (.terraform.lock.hcl) committed.

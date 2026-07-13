@@ -1,0 +1,54 @@
+# Defaults for one Aegis service. Override per service, e.g.:
+#   helm install identity aegis-service -f values-identity.yaml
+name: aegis-service
+image:
+  repository: ghcr.io/aegis/aegis-service
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+containerPort: 8080
+
+# Pod identity (IRSA on EKS / Workload Identity on AKS): set the annotation the cloud expects.
+serviceAccount:
+  create: true
+  annotations: {}
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+
+# Non-secret config injected as env. Secrets come from the cloud secret store via CSI / external-secrets.
+env:
+  SPRING_PROFILES_ACTIVE: prod
+
+# Default-deny egress/ingress; open only what the service needs.
+networkPolicy:
+  enabled: true
+  # CIDRs/namespaces allowed to call this service's port.
+  ingressFrom: []
+
+probes:
+  path: /actuator/health
+  livenessPath: /actuator/health/liveness
+  readinessPath: /actuator/health/readiness
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]

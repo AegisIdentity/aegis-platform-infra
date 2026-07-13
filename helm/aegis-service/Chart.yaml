@@ -1,0 +1,6 @@
+apiVersion: v2
+name: aegis-service
+description: Reusable chart for an Aegis service (Deployment, Service, HPA, default-deny NetworkPolicy).
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

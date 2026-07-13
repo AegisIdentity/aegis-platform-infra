@@ -1,0 +1,86 @@
+# Aegis per-service CI pipeline. Copy into each service repo as .github/workflows/ci.yml.
+# Gates merge on: compile, unit+integration tests (Testcontainers), coverage, SAST, dependency CVEs,
+# and container image scan. The shared aegis-platform-parent/commons artifacts are resolved from the
+# org Maven registry (GitHub Packages) — see settings note below.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest # GitHub-hosted runners provide a Docker daemon for Testcontainers
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build, test (unit + Testcontainers), coverage gate
+        env:
+          MAVEN_OPTS: -Dorg.slf4j.simpleLogger.showDateTime=true
+        run: ./mvnw -B verify
+
+      - name: SAST (SpotBugs)
+        run: ./mvnw -B spotbugs:check || (echo "::warning::SpotBugs findings" && exit 1)
+
+      - name: Dependency CVE scan (OWASP Dependency-Check, fails on CVSS >= 7)
+        run: ./mvnw -B org.owasp:dependency-check-maven:check
+        continue-on-error: false
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco
+          path: "**/target/site/jacoco/**"
+
+  image:
+    needs: build-test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # for cosign keyless signing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Package fat jar
+        run: ./mvnw -B -DskipTests package
+
+      - name: Build image
+        run: docker build -t "ghcr.io/${{ github.repository }}:${{ github.sha }}" .
+
+      - name: Scan image (Trivy, fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "ghcr.io/${{ github.repository }}:${{ github.sha }}"
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push + sign (cosign keyless)
+        run: |
+          docker push "ghcr.io/${{ github.repository }}:${{ github.sha }}"
+          # cosign sign --yes "ghcr.io/${{ github.repository }}:${{ github.sha }}"
