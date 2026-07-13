@@ -77,6 +77,9 @@ services:
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
       AEGIS_ISSUER: http://authorization-server:9000
+      # Fetch JWKS in-network; accept both the browser-facing and in-network issuers (split-horizon).
+      AEGIS_JWKS_URI: http://authorization-server:9000/oauth2/jwks
+      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000
       AEGIS_CORS_ORIGINS: http://localhost:3000,http://localhost:8080
     ports:
       - "9102:9102"
