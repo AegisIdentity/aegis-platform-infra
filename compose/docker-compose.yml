@@ -106,6 +106,24 @@ services:
       authorization-server:
         condition: service_healthy
 
+  social-broker-service:
+    build: ../../aegis-social-broker-service
+    image: aegis/social-broker-service:0.1.0
+    environment:
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/aegis_social
+      POSTGRES_USER: aegis
+      POSTGRES_PASSWORD: dev-only-change-me
+      # Fetch JWKS in-network; accept both browser-facing and in-network issuers (split-horizon).
+      AEGIS_JWKS_URI: http://authorization-server:9000/oauth2/jwks
+      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000
+    ports:
+      - "9105:9105"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      authorization-server:
+        condition: service_healthy
+
   edge-gateway:
     build: ../../aegis-edge-gateway
     image: aegis/edge-gateway:0.1.0
@@ -113,6 +131,7 @@ services:
       AUTHZ_URI: http://authorization-server:9000
       IDENTITY_URI: http://identity-service:9102
       TENANT_URI: http://tenant-service:9101
+      SOCIAL_URI: http://social-broker-service:9105
     ports:
       - "8080:8080"
     depends_on:
@@ -121,6 +140,8 @@ services:
       identity-service:
         condition: service_healthy
       tenant-service:
+        condition: service_healthy
+      social-broker-service:
         condition: service_healthy
 
   # Okta-style front-end (admin console + end-user portal + branded sign-in). Static SPA served by
