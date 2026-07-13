@@ -24,7 +24,14 @@ curl -s -u aegis-dev-m2m:dev-only-change-me \
 
 `compose/init/10-create-databases.sql` creates one database per service (database-per-service,
 ADR-0002). The core services (`authorization-server`, `identity-service`, `tenant-service`,
-`edge-gateway`) run; the remaining services are scaffolds and are added to compose as they mature.
+`edge-gateway`) plus the **`admin-console`** front-end (nginx SPA on **http://localhost:3000**) run;
+the remaining backend services are scaffolds and are added to compose as they mature.
+
+> **Front-end sign-in in compose.** The SPA (browser) uses the OIDC issuer
+> `http://authorization-server:9000`, which must resolve identically for the browser and the
+> in-cluster services — add `127.0.0.1 authorization-server` to your `/etc/hosts`, then open the
+> console at `http://localhost:3000`. Its redirect URIs are pre-registered on the `aegis-dev-spa`
+> client. The `admin-console` image builds itself (Node → nginx); it does not use `build-all.sh`.
 
 ## Cloud — Terraform
 Two self-contained roots sharing conventions; both `terraform validate` cleanly.

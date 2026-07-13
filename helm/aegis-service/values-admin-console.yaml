@@ -1,0 +1,36 @@
+# Frontend (nginx-served SPA) overrides for the reusable aegis-service chart:
+#   helm install admin-console helm/aegis-service -f helm/aegis-service/values-admin-console.yaml
+name: admin-console
+image:
+  repository: ghcr.io/aegis/aegis-admin-console
+  tag: "0.1.0"
+containerPort: 80
+
+# Static bundle — runtime endpoints are baked at build time by Vite (build args), so no env here.
+env: {}
+
+probes:
+  path: /
+  livenessPath: /
+  readinessPath: /
+
+# nginx:alpine binds :80 and writes its pid/cache, so the hardened defaults are relaxed here.
+# For a fully hardened pod, switch the image to nginxinc/nginx-unprivileged (:8080, non-root,
+# read-only rootfs) and set containerPort accordingly.
+podSecurityContext:
+  runAsNonRoot: false
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: ["ALL"]
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+
+networkPolicy:
+  enabled: true
+  ingressFrom: []

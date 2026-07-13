@@ -75,7 +75,7 @@ services:
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
       AEGIS_ISSUER: http://authorization-server:9000
-      AEGIS_CORS_ORIGINS: http://localhost:8080
+      AEGIS_CORS_ORIGINS: http://localhost:3000,http://localhost:8080
     ports:
       - "9102:9102"
     depends_on:
@@ -92,7 +92,7 @@ services:
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
       AEGIS_ISSUER: http://authorization-server:9000
-      AEGIS_CORS_ORIGINS: http://localhost:8080
+      AEGIS_CORS_ORIGINS: http://localhost:3000,http://localhost:8080
     ports:
       - "9101:9101"
     depends_on:
@@ -117,6 +117,24 @@ services:
         condition: service_healthy
       tenant-service:
         condition: service_healthy
+
+  # Okta-style front-end (admin console + end-user portal + branded sign-in). Static SPA served by
+  # nginx. Browser reaches the OIDC issuer at http://authorization-server:9000, so add
+  #   127.0.0.1 authorization-server
+  # to your /etc/hosts (the issuer must be identical for the browser and the in-cluster services).
+  admin-console:
+    build:
+      context: ../../aegis-admin-console
+      args:
+        VITE_OIDC_AUTHORITY: http://authorization-server:9000
+        VITE_OIDC_CLIENT_ID: aegis-dev-spa
+        VITE_API_BASE: http://localhost:8080
+    image: aegis/admin-console:0.1.0
+    ports:
+      - "3000:80"
+    depends_on:
+      edge-gateway:
+        condition: service_started
 
 volumes:
   pgdata:

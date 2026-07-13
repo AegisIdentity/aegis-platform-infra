@@ -38,10 +38,13 @@ variable "db_instance_class" {
 
 variable "services" {
   type        = list(string)
-  description = "Service names that get an ECR repository."
+  description = "Service names that get an ECR repository (includes the nginx-served frontend)."
   default = [
     "authorization-server", "identity-service", "tenant-service", "edge-gateway",
     "mfa-webauthn-service", "saml-idp-service", "social-broker-service",
     "scim-provisioning-service", "admin-api-service",
+    # Frontend container (nginx). Alternatively host the SPA on S3 + CloudFront (AWS) / Blob Static
+    # Website + CDN (Azure) instead of the cluster — both patterns are supported.
+    "admin-console",
   ]
 }

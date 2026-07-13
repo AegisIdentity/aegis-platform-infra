@@ -1,0 +1,59 @@
+# Aegis frontend CI (aegis-admin-console). Copy into the repo as .github/workflows/ci.yml.
+# Node build + tests + type-check, then container build + image scan on main.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Type-check + build
+        run: npm run build
+      - name: Unit tests (Vitest)
+        run: npm run test
+      - name: Dependency audit (fail on high)
+        run: npm audit --audit-level=high
+        continue-on-error: true # ratchet to false once the baseline is clean
+
+  image:
+    needs: build-test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg VITE_OIDC_AUTHORITY="${{ vars.VITE_OIDC_AUTHORITY }}" \
+            --build-arg VITE_OIDC_CLIENT_ID="${{ vars.VITE_OIDC_CLIENT_ID }}" \
+            --build-arg VITE_API_BASE="${{ vars.VITE_API_BASE }}" \
+            -t "ghcr.io/${{ github.repository }}:${{ github.sha }}" .
+      - name: Scan image (Trivy, fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "ghcr.io/${{ github.repository }}:${{ github.sha }}"
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: docker push "ghcr.io/${{ github.repository }}:${{ github.sha }}"
