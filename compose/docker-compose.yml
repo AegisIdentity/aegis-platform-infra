@@ -61,6 +61,8 @@ services:
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
       AEGIS_ISSUER: http://authorization-server:9000
+      # Login delegates credential verification to identity-service.
+      IDENTITY_SERVICE_URL: http://identity-service:9102
     ports:
       - "9000:9000"
     depends_on:
