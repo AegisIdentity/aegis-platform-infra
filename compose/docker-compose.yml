@@ -63,6 +63,8 @@ services:
       AEGIS_ISSUER: http://authorization-server:9000
       # Login delegates credential verification to identity-service.
       IDENTITY_SERVICE_URL: http://identity-service:9102
+      # Federated login resolves per-tenant provider config from the social-broker.
+      SOCIAL_BROKER_URL: http://social-broker-service:9105
     ports:
       - "9000:9000"
     depends_on:
