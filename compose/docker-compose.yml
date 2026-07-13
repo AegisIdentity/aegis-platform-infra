@@ -126,6 +126,29 @@ services:
       authorization-server:
         condition: service_healthy
 
+  mfa-webauthn-service:
+    build: ../../aegis-mfa-webauthn-service
+    image: aegis/mfa-webauthn-service:0.1.0
+    environment:
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/aegis_mfa
+      POSTGRES_USER: aegis
+      POSTGRES_PASSWORD: dev-only-change-me
+      # Fetch JWKS in-network; accept both browser-facing and in-network issuers (split-horizon).
+      AEGIS_JWKS_URI: http://authorization-server:9000/oauth2/jwks
+      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000
+      # The passkey ceremony runs in the browser at the console origin; rp-id must be a registrable
+      # suffix of that origin. Locally the console is http://localhost:3000, so rp-id=localhost.
+      AEGIS_WEBAUTHN_RP_ID: localhost
+      AEGIS_WEBAUTHN_RP_NAME: Aegis
+      AEGIS_WEBAUTHN_ORIGINS: http://localhost:3000
+    ports:
+      - "9103:9103"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      authorization-server:
+        condition: service_healthy
+
   edge-gateway:
     build: ../../aegis-edge-gateway
     image: aegis/edge-gateway:0.1.0
@@ -134,6 +157,7 @@ services:
       IDENTITY_URI: http://identity-service:9102
       TENANT_URI: http://tenant-service:9101
       SOCIAL_URI: http://social-broker-service:9105
+      MFA_URI: http://mfa-webauthn-service:9103
     ports:
       - "8080:8080"
     depends_on:
@@ -145,6 +169,8 @@ services:
         condition: service_healthy
       social-broker-service:
         condition: service_healthy
+      mfa-webauthn-service:
+        condition: service_started
 
   # Okta-style front-end (admin console + end-user portal + branded sign-in). Static SPA served by
   # nginx. Browser reaches the OIDC issuer at http://authorization-server:9000, so add
