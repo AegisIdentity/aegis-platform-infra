@@ -67,6 +67,8 @@ services:
       SOCIAL_BROKER_URL: http://social-broker-service:9105
       # Step-up MFA at login is driven against the mfa-webauthn-service.
       MFA_SERVICE_URL: http://mfa-webauthn-service:9103
+      # Secret for the aegis-scim client_credentials client (must match the SCIM service).
+      AEGIS_SCIM_CLIENT_SECRET: scim-dev-only-change-me
     ports:
       - "9000:9000"
     depends_on:
@@ -101,7 +103,12 @@ services:
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
       AEGIS_ISSUER: http://authorization-server:9000
+      # Split-horizon: accept both browser-facing and in-network issuers (see ResourceServerJwtConfig).
+      AEGIS_JWKS_URI: http://authorization-server:9000/oauth2/jwks
+      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000
       AEGIS_CORS_ORIGINS: http://localhost:3000,http://localhost:8080
+      # Local dev: skip the real DNS TXT check so custom domains can be verified without owning DNS.
+      AEGIS_DOMAINS_AUTO_VERIFY: "true"
     ports:
       - "9101:9101"
     depends_on:
@@ -152,6 +159,45 @@ services:
       authorization-server:
         condition: service_healthy
 
+  admin-api-service:
+    build: ../../aegis-admin-api-service
+    image: aegis/admin-api-service:0.1.0
+    environment:
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/aegis_admin
+      POSTGRES_USER: aegis
+      POSTGRES_PASSWORD: dev-only-change-me
+      AEGIS_JWKS_URI: http://authorization-server:9000/oauth2/jwks
+      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000
+    ports:
+      - "9107:9107"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      authorization-server:
+        condition: service_healthy
+
+  scim-provisioning-service:
+    build: ../../aegis-scim-provisioning-service
+    image: aegis/scim-provisioning-service:0.1.0
+    environment:
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/aegis_scim
+      POSTGRES_USER: aegis
+      POSTGRES_PASSWORD: dev-only-change-me
+      AEGIS_JWKS_URI: http://authorization-server:9000/oauth2/jwks
+      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000
+      # SCIM provisions users into identity-service using a client_credentials token from the AS.
+      AEGIS_AS_TOKEN_URI: http://authorization-server:9000/oauth2/token
+      AEGIS_SCIM_CLIENT_SECRET: scim-dev-only-change-me
+      IDENTITY_SERVICE_URL: http://identity-service:9102
+      AEGIS_IDENTITY_SERVICE_BASE_URL: http://identity-service:9102
+    ports:
+      - "9106:9106"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      authorization-server:
+        condition: service_healthy
+
   edge-gateway:
     build: ../../aegis-edge-gateway
     image: aegis/edge-gateway:0.1.0
@@ -161,6 +207,8 @@ services:
       TENANT_URI: http://tenant-service:9101
       SOCIAL_URI: http://social-broker-service:9105
       MFA_URI: http://mfa-webauthn-service:9103
+      ADMIN_API_URI: http://admin-api-service:9107
+      SCIM_URI: http://scim-provisioning-service:9106
     ports:
       - "8080:8080"
     depends_on:
@@ -173,6 +221,10 @@ services:
       social-broker-service:
         condition: service_healthy
       mfa-webauthn-service:
+        condition: service_started
+      admin-api-service:
+        condition: service_started
+      scim-provisioning-service:
         condition: service_started
 
   # Okta-style front-end (admin console + end-user portal + branded sign-in). Static SPA served by
