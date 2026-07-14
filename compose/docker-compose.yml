@@ -61,6 +61,9 @@ services:
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
       AEGIS_ISSUER: http://authorization-server:9000
+      # Public issuer base: tenant-app tokens carry iss = http://localhost:8080/<tenant> — the
+      # per-tenant issuer THROUGH THE GATEWAY, resolvable by tenants' own apps and backends.
+      AEGIS_PUBLIC_ISSUER_BASE: http://localhost:8080
       # Login delegates credential verification to identity-service.
       IDENTITY_SERVICE_URL: http://identity-service:9102
       # Federated login resolves per-tenant provider config from the social-broker.
@@ -84,8 +87,8 @@ services:
       POSTGRES_PASSWORD: dev-only-change-me
       AEGIS_ISSUER: http://authorization-server:9000
       # Fetch JWKS in-network; accept both the browser-facing and in-network issuers (split-horizon).
-      AEGIS_JWKS_URI: http://authorization-server:9000/oauth2/jwks
-      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000
+      AEGIS_JWKS_URI: http://authorization-server:9000/internal/jwks
+      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000,http://localhost:8080,http://edge-gateway:8080
       AEGIS_CORS_ORIGINS: http://localhost:3000,http://localhost:8080
     ports:
       - "9102:9102"
@@ -104,8 +107,8 @@ services:
       POSTGRES_PASSWORD: dev-only-change-me
       AEGIS_ISSUER: http://authorization-server:9000
       # Split-horizon: accept both browser-facing and in-network issuers (see ResourceServerJwtConfig).
-      AEGIS_JWKS_URI: http://authorization-server:9000/oauth2/jwks
-      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000
+      AEGIS_JWKS_URI: http://authorization-server:9000/internal/jwks
+      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000,http://localhost:8080,http://edge-gateway:8080
       AEGIS_CORS_ORIGINS: http://localhost:3000,http://localhost:8080
       # Local dev: skip the real DNS TXT check so custom domains can be verified without owning DNS.
       AEGIS_DOMAINS_AUTO_VERIFY: "true"
@@ -125,8 +128,8 @@ services:
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
       # Fetch JWKS in-network; accept both browser-facing and in-network issuers (split-horizon).
-      AEGIS_JWKS_URI: http://authorization-server:9000/oauth2/jwks
-      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000
+      AEGIS_JWKS_URI: http://authorization-server:9000/internal/jwks
+      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000,http://localhost:8080,http://edge-gateway:8080
     ports:
       - "9105:9105"
     depends_on:
@@ -143,14 +146,14 @@ services:
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
       # Fetch JWKS in-network; accept both browser-facing and in-network issuers (split-horizon).
-      AEGIS_JWKS_URI: http://authorization-server:9000/oauth2/jwks
-      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000
+      AEGIS_JWKS_URI: http://authorization-server:9000/internal/jwks
+      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000,http://localhost:8080,http://edge-gateway:8080
       # The passkey ceremony runs in the browser at the console origin; rp-id must be a registrable
       # suffix of that origin. Locally the console is http://localhost:3000, so rp-id=localhost.
       AEGIS_WEBAUTHN_RP_ID: localhost
       AEGIS_WEBAUTHN_RP_NAME: Aegis
       # Both the console (self-service registration) and the hosted login page (passkey sign-in) origins.
-      AEGIS_WEBAUTHN_ORIGINS: http://localhost:3000,http://localhost:9000
+      AEGIS_WEBAUTHN_ORIGINS: http://localhost:3000,http://localhost:9000,http://localhost:8080
     ports:
       - "9103:9103"
     depends_on:
@@ -166,8 +169,8 @@ services:
       POSTGRES_URL: jdbc:postgresql://postgres:5432/aegis_admin
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
-      AEGIS_JWKS_URI: http://authorization-server:9000/oauth2/jwks
-      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000
+      AEGIS_JWKS_URI: http://authorization-server:9000/internal/jwks
+      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000,http://localhost:8080,http://edge-gateway:8080
     ports:
       - "9107:9107"
     depends_on:
@@ -183,8 +186,8 @@ services:
       POSTGRES_URL: jdbc:postgresql://postgres:5432/aegis_scim
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
-      AEGIS_JWKS_URI: http://authorization-server:9000/oauth2/jwks
-      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000
+      AEGIS_JWKS_URI: http://authorization-server:9000/internal/jwks
+      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000,http://localhost:8080,http://edge-gateway:8080
       # SCIM provisions users into identity-service using a client_credentials token from the AS.
       AEGIS_AS_TOKEN_URI: http://authorization-server:9000/oauth2/token
       AEGIS_SCIM_CLIENT_SECRET: scim-dev-only-change-me
