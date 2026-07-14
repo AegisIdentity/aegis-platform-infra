@@ -142,7 +142,8 @@ services:
       # suffix of that origin. Locally the console is http://localhost:3000, so rp-id=localhost.
       AEGIS_WEBAUTHN_RP_ID: localhost
       AEGIS_WEBAUTHN_RP_NAME: Aegis
-      AEGIS_WEBAUTHN_ORIGINS: http://localhost:3000
+      # Both the console (self-service registration) and the hosted login page (passkey sign-in) origins.
+      AEGIS_WEBAUTHN_ORIGINS: http://localhost:3000,http://localhost:9000
     ports:
       - "9103:9103"
     depends_on:
@@ -182,7 +183,9 @@ services:
     build:
       context: ../../aegis-admin-console
       args:
-        VITE_OIDC_AUTHORITY: http://authorization-server:9000
+        # Login is served on localhost (same hostname as the console) so passkeys (rpId=localhost,
+        # port-independent) registered in the console also work on the hosted login page.
+        VITE_OIDC_AUTHORITY: http://localhost:9000
         VITE_OIDC_CLIENT_ID: aegis-dev-spa
         VITE_API_BASE: http://localhost:8080
     image: aegis/admin-console:0.1.0
