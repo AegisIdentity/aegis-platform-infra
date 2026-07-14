@@ -65,6 +65,8 @@ services:
       IDENTITY_SERVICE_URL: http://identity-service:9102
       # Federated login resolves per-tenant provider config from the social-broker.
       SOCIAL_BROKER_URL: http://social-broker-service:9105
+      # Step-up MFA at login is driven against the mfa-webauthn-service.
+      MFA_SERVICE_URL: http://mfa-webauthn-service:9103
     ports:
       - "9000:9000"
     depends_on:
