@@ -1,11 +1,24 @@
 terraform {
-  # Remote state per environment. Bootstrap the storage account once, then
-  # uncomment. State is isolated per environment by key.
-  # backend "azurerm" {
-  #   resource_group_name  = "aegis-tfstate"
-  #   storage_account_name = "aegistfstate"
-  #   container_name       = "tfstate"
-  #   key                  = "azure-prod.tfstate"
-  #   use_azuread_auth     = true
-  # }
+  # Remote state per environment (H8). State holds the Postgres admin password (the
+  # module comment's "lands only in encrypted remote state" is only true once this is
+  # enabled) — it must live in the encrypted, RBAC-controlled azurerm backend, never an
+  # unencrypted local terraform.tfstate.
+  #
+  # Bootstrap ONCE before the first apply (see terraform/README.md): create the storage
+  # account (blob versioning + soft delete, public access disabled, Azure AD auth) and
+  # the tfstate container, then init with the globally-unique account name via partial
+  # config:
+  #
+  #   terraform init -backend-config="storage_account_name=aegistfstate<suffix>"
+  #
+  # CI must pass -backend-config; an init without it fails rather than silently writing
+  # local state, which is the guardrail replacing an (inexpressible-in-HCL) "reject
+  # local backend" precondition.
+  backend "azurerm" {
+    resource_group_name = "aegis-tfstate"
+    # storage_account_name — supplied at init via -backend-config (globally unique)
+    container_name   = "tfstate"
+    key              = "azure-prod.tfstate"
+    use_azuread_auth = true
+  }
 }

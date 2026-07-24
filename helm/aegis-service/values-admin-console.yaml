@@ -2,9 +2,15 @@
 #   helm install admin-console helm/aegis-service -f helm/aegis-service/values-admin-console.yaml
 name: admin-console
 image:
+  # M-infra-5: nginxinc/nginx-unprivileged listens on :8080, runs as a non-root user, and
+  # works with a read-only root filesystem — so this internet-facing SPA server no longer
+  # runs as in-container root. The console image must be built FROM nginx-unprivileged (or
+  # otherwise bind :8080 as non-root). L-infra-4: prefer a digest pin over a mutable tag in
+  # prod, e.g. repository@sha256:... captured from the CI push.
   repository: ghcr.io/aegis/aegis-admin-console
   tag: "0.1.0"
-containerPort: 80
+# nginx-unprivileged serves on 8080.
+containerPort: 8080
 
 # Static bundle — runtime endpoints are baked at build time by Vite (build args), so no env here.
 env: {}
@@ -14,16 +20,30 @@ probes:
   livenessPath: /
   readinessPath: /
 
-# nginx:alpine binds :80 and writes its pid/cache, so the hardened defaults are relaxed here.
-# For a fully hardened pod, switch the image to nginxinc/nginx-unprivileged (:8080, non-root,
-# read-only rootfs) and set containerPort accordingly.
+# M-infra-5: fully hardened pod — non-root, read-only rootfs, no privilege escalation, all
+# caps dropped. nginx needs a few writable paths under a read-only rootfs; provide them as
+# emptyDir mounts (the nginx-unprivileged image writes its cache/pid under /tmp and
+# /var/cache/nginx).
 podSecurityContext:
-  runAsNonRoot: false
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
 containerSecurityContext:
   allowPrivilegeEscalation: false
-  readOnlyRootFilesystem: false
+  readOnlyRootFilesystem: true
   capabilities:
     drop: ["ALL"]
+
+extraVolumeMounts:
+  - name: nginx-cache
+    mountPath: /var/cache/nginx
+  - name: nginx-run
+    mountPath: /var/run
+extraVolumes:
+  - name: nginx-cache
+    emptyDir: {}
+  - name: nginx-run
+    emptyDir: {}
 
 autoscaling:
   enabled: true
@@ -34,3 +54,4 @@ autoscaling:
 networkPolicy:
   enabled: true
   ingressFrom: []
+  egressTo: []

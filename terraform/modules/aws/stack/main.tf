@@ -39,6 +39,7 @@ locals {
       kafka_volume_gb        = 50
       kafka_iam_auth         = false
       kafka_broker_logs      = false
+      enable_audit           = false
     }
     hardened = {
       single_nat_gateway     = false
@@ -70,6 +71,7 @@ locals {
       kafka_volume_gb        = 200
       kafka_iam_auth         = true
       kafka_broker_logs      = true
+      enable_audit           = true
     }
   }
 
@@ -113,12 +115,16 @@ module "kms" {
 module "eks" {
   source = "../eks"
 
-  name                         = local.name
-  cluster_version              = var.cluster_version
-  vpc_id                       = module.network.vpc_id
-  private_subnets              = module.network.private_subnets
-  endpoint_public_access       = local.p.eks_endpoint_public
-  endpoint_public_access_cidrs = var.endpoint_public_access_cidrs
+  name                   = local.name
+  cluster_version        = var.cluster_version
+  vpc_id                 = module.network.vpc_id
+  private_subnets        = module.network.private_subnets
+  endpoint_public_access = local.p.eks_endpoint_public
+  # M-infra-1: cost profile is public — forward the required office/VPN allowlist (the
+  # variable's validation guarantees it is non-empty and not 0.0.0.0/0). Hardened is
+  # private, so the CIDR list is ignored by AWS; pass 0.0.0.0/0 only to satisfy the API's
+  # "publicAccessCidrs must be non-empty" rule (it has no effect while public access is off).
+  endpoint_public_access_cidrs = local.p.eks_endpoint_public ? var.endpoint_public_access_cidrs : ["0.0.0.0/0"]
   enabled_log_types            = local.p.eks_log_types
   log_retention_days           = local.p.log_retention_days
   node_instance_types          = local.p.node_instance_types
@@ -195,7 +201,7 @@ module "irsa_external_secrets" {
   oidc_provider_arn = module.eks.oidc_provider_arn
   oidc_issuer_url   = module.eks.cluster_oidc_issuer_url
   namespace         = var.workload_namespace
-  service_account   = "external-secrets"
+  service_accounts  = ["external-secrets"]
 
   policy_json = jsonencode({
     Version = "2012-10-17"
@@ -217,7 +223,7 @@ module "irsa_signing" {
   oidc_provider_arn = module.eks.oidc_provider_arn
   oidc_issuer_url   = module.eks.cluster_oidc_issuer_url
   namespace         = var.workload_namespace
-  service_account   = "authorization-server"
+  service_accounts  = ["authorization-server"]
 
   policy_json = jsonencode({
     Version = "2012-10-17"
@@ -230,8 +236,11 @@ module "irsa_signing" {
   })
 }
 
-# Hardened profile runs MSK with SASL/IAM: every producer/consumer in the
-# aegis namespace authenticates as this role, scoped to this cluster only.
+# Hardened profile runs MSK with SASL/IAM. M-infra-2: trust only the enumerated
+# event-producing/consuming service accounts — NOT every SA in the namespace (a
+# wildcard let a compromised admin-console nginx pod assume this role and read/write
+# all topics). Narrow var.event_client_service_accounts to the real producers/consumers,
+# or split per-service roles with topic-prefix-scoped policies for full least privilege.
 module "irsa_events_client" {
   count  = local.p.kafka_iam_auth ? 1 : 0
   source = "../irsa"
@@ -240,7 +249,7 @@ module "irsa_events_client" {
   oidc_provider_arn = module.eks.oidc_provider_arn
   oidc_issuer_url   = module.eks.cluster_oidc_issuer_url
   namespace         = var.workload_namespace
-  service_account   = "*"
+  service_accounts  = var.event_client_service_accounts
 
   policy_json = jsonencode({
     Version = "2012-10-17"
@@ -265,4 +274,17 @@ module "irsa_events_client" {
       }
     ]
   })
+}
+
+# Account-level detection & audit (M-infra-4): CloudTrail + GuardDuty + AWS Config.
+# Hardened profile only — dev/test rely on the same controls at the org/landing-zone level
+# (or accept the gap by design). See modules/aws/audit for operator prerequisites (single
+# trail/recorder per account, org-trail requires the management account).
+module "audit" {
+  count  = local.p.enable_audit ? 1 : 0
+  source = "../audit"
+
+  name               = local.name
+  environment        = var.environment
+  log_retention_days = local.p.log_retention_days
 }

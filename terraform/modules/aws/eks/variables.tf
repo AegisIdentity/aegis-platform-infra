@@ -23,8 +23,8 @@ variable "endpoint_public_access" {
 
 variable "endpoint_public_access_cidrs" {
   type        = list(string)
-  default     = ["0.0.0.0/0"]
-  description = "CIDRs allowed to reach a public API endpoint. Narrow this to your office/VPN egress."
+  default     = []
+  description = "CIDRs allowed to reach a public API endpoint. Narrow this to your office/VPN egress (the stack enforces a non-empty, non-0.0.0.0/0 allowlist for the public/cost profile)."
 }
 
 variable "enabled_log_types" {

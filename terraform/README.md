@@ -62,14 +62,61 @@ access, encryption at rest.
 
 ```sh
 cd terraform/aws/envs/dev        # or any other environment
-terraform init                   # uncomment backend.tf first for remote state
+
+# Remote state is REQUIRED (H8): backend.tf declares an S3/azurerm backend with a
+# partial config. Bootstrap the state store once (below), then pass the account-specific
+# bucket / storage account at init:
+terraform init -backend-config="bucket=aegis-tfstate-<account-id>"          # AWS
+# terraform init -backend-config="storage_account_name=aegistfstate<suffix>"  # Azure
+
 terraform plan
 terraform apply
 ```
 
-- **State**: each environment has its own state. Bootstrap the S3 bucket +
-  DynamoDB table (AWS) / storage account (Azure) once, then uncomment
-  `backend.tf`. Never share state between environments.
+### State bootstrap (do this once, before any apply — H8)
+
+The backends are **enabled**: state carries live secrets (Redis AUTH token, RDS
+master-secret path, Azure Postgres admin password), so it must never land in an
+unencrypted local `terraform.tfstate`. Bootstrap the backing store first:
+
+- **AWS**: create an S3 bucket (versioning on, SSE, Block Public Access on) and a
+  DynamoDB lock table named `aegis-tflock`. The bucket name is globally unique, so
+  each env's `backend.tf` leaves `bucket` to be supplied via
+  `-backend-config="bucket=..."` at init. `key`/`region`/`encrypt`/`dynamodb_table`
+  are fixed per env.
+- **Azure**: create a resource group `aegis-tfstate`, a storage account (blob
+  versioning + soft delete, public access disabled, Azure AD auth) and a `tfstate`
+  container. The storage account name is globally unique, so supply it via
+  `-backend-config="storage_account_name=..."` at init.
+
+`terraform init` without `-backend-config` fails rather than silently writing local
+state — that refusal is the guardrail (a "reject local backend" precondition is not
+expressible in HCL). **CI must pass `-backend-config` and should gate on remote state
+being configured.** Never share state between environments.
+
+### Required per-environment inputs (no defaults — plan fails until set)
+
+- **stage/prod (Azure)** — `admin_group_object_ids` (H9): the Entra ID group object
+  IDs granted Azure RBAC cluster admin. No default, so `plan` fails until you supply
+  the real prod/stage group GUIDs (e.g. `TF_VAR_admin_group_object_ids='["<guid>"]'`).
+  Empty is rejected for the hardened profile — it would re-enable static local admin
+  kubeconfigs.
+- **dev/test (AWS)** — `endpoint_public_access_cidrs` (M-infra-1): the cost profile
+  exposes a public EKS API endpoint, so it must be narrowed to office/VPN CIDRs. The
+  roots ship a placeholder (`203.0.113.0/24`); replace it before apply. `0.0.0.0/0`
+  is rejected.
+
+### Detection & audit (M-infra-4)
+
+The hardened profile wires an **audit module** (`modules/{aws,azure}/audit`): AWS
+CloudTrail + GuardDuty + Config; Azure Log Analytics + diagnostic settings for
+AKS/Key Vault/ACR/Postgres + Microsoft Defender plans. These are account/subscription
+-scoped singletons — if a landing zone already owns them centrally, omit the module
+(set the profile's `enable_audit` to false or remove the `module "audit"` call) to
+avoid conflicts. See each module's header for prerequisites.
+
+- **State**: each environment has its own state (isolated by backend `key`). Never
+  share state between environments.
 - **Credentials**: standard `AWS_PROFILE` / `az login` + `ARM_SUBSCRIPTION_ID`.
   The identity running apply needs rights to create IAM roles / role
   assignments (least-privilege runbooks live with the pipeline).

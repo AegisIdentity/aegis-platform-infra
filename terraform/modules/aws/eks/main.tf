@@ -23,12 +23,32 @@ module "eks" {
   # The identity that runs terraform apply administers the cluster; grant any
   # further humans/pipelines access with explicit EKS access entries, not
   # long-lived kubeconfig credentials.
+  # L-infra-5: acceptable for bootstrap, but for prod prefer a dedicated, rarely-assumed
+  # break-glass role as the cluster creator/admin (rather than a routine CI/human
+  # principal), and grant day-to-day access via scoped EKS access entries. Set this false
+  # once such a role + access entries are in place so cluster-admin isn't tied to whoever
+  # first ran apply.
   enable_cluster_creator_admin_permissions = true
 
   # Control-plane audit trail. The module encrypts Kubernetes secrets with a
   # dedicated KMS key by default (cluster_encryption_config).
   cluster_enabled_log_types              = var.enabled_log_types
   cloudwatch_log_group_retention_in_days = var.log_retention_days
+
+  # M-infra-3: enable NetworkPolicy enforcement on the VPC CNI so the Helm
+  # chart's default-deny egress policy is actually enforced on EKS (the AWS VPC
+  # CNI ships with policy enforcement OFF, which would leave the policy inert —
+  # Azure AKS enforces via Calico). coredns/kube-proxy pinned as managed addons
+  # so the data plane is reconciled by EKS rather than drifting.
+  cluster_addons = {
+    coredns    = {}
+    kube-proxy = {}
+    vpc-cni = {
+      configuration_values = jsonencode({
+        enableNetworkPolicy = "true"
+      })
+    }
+  }
 
   eks_managed_node_group_defaults = {
     # IMDSv2 only — blocks SSRF-based credential theft from pods.

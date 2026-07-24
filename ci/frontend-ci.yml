@@ -1,5 +1,8 @@
 # Aegis frontend CI (aegis-admin-console). Copy into the repo as .github/workflows/ci.yml.
 # Node build + tests + type-check, then container build + image scan on main.
+#
+# Supply-chain hardening: every action is pinned to a full commit SHA; the trailing `# vX.Y.Z`
+# comment records the version each SHA corresponds to. Bump SHA + comment together.
 name: ci
 
 on:
@@ -14,8 +17,8 @@ jobs:
   build-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
@@ -26,7 +29,9 @@ jobs:
         run: npm run test
       - name: Dependency audit (fail on high)
         run: npm audit --audit-level=high
-        continue-on-error: true # ratchet to false once the baseline is clean
+        # TODO: ratchet to `continue-on-error: false` (blocking) once the current advisories are
+        # triaged/resolved. Trivy on the built image is a blocking backstop in the meantime.
+        continue-on-error: true
 
   image:
     needs: build-test
@@ -36,7 +41,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Build image
         run: |
           docker build \
@@ -45,13 +50,14 @@ jobs:
             --build-arg VITE_API_BASE="${{ vars.VITE_API_BASE }}" \
             -t "ghcr.io/${{ github.repository }}:${{ github.sha }}" .
       - name: Scan image (Trivy, fail on HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@master
+        # Pinned to a release SHA (was @master — mutable branch in a push-to-GHCR job).
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
         with:
           image-ref: "ghcr.io/${{ github.repository }}:${{ github.sha }}"
           severity: HIGH,CRITICAL
           exit-code: "1"
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

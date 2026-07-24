@@ -15,9 +15,13 @@ variable "namespace" {
   description = "Kubernetes namespace of the service account."
 }
 
-variable "service_account" {
-  type        = string
-  description = "Service account name; may contain * (matched with StringLike)."
+variable "service_accounts" {
+  type        = list(string)
+  description = "Explicit service account names the role trusts (each becomes a StringEquals sub condition). Avoid '*' — enumerate the accounts. A '*' anywhere switches the whole condition to StringLike."
+  validation {
+    condition     = length(var.service_accounts) > 0
+    error_message = "service_accounts must list at least one service account (wildcard-only trust is not allowed)."
+  }
 }
 
 variable "policy_json" {

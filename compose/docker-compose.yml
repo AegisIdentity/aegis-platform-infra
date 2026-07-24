@@ -13,8 +13,10 @@ services:
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
       POSTGRES_DB: aegis
+    # M-infra-6: bind to loopback only — the data store must not be reachable from the LAN.
+    # Services reach it over the compose network by hostname; developers use localhost.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - ./init:/docker-entrypoint-initdb.d:ro
       - pgdata:/var/lib/postgresql/data
@@ -26,9 +28,14 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    # M-infra-6: enforce AUTH (requirepass) for consistency with the deployed TLS+AUTH
+    # cache, and bind to loopback only. REDISCLI_AUTH lets the healthcheck authenticate
+    # without putting the password on the command line.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--requirepass", "dev-only-change-me"]
+    environment:
+      REDISCLI_AUTH: dev-only-change-me
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -39,8 +46,9 @@ services:
   # do not yet publish to it, so nothing depends on it — it is here for the next iteration.
   kafka:
     image: apache/kafka:3.9.0
+    # M-infra-6: bind to loopback only (PLAINTEXT broker — must not be LAN-reachable).
     ports:
-      - "9092:9092"
+      - "127.0.0.1:9092:9092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -57,6 +65,10 @@ services:
     build: ../../aegis-authorization-server
     image: aegis/authorization-server:0.1.0
     environment:
+      # Dev profile activates seeded clients/admin, ddl-auto=update, dev secret fallbacks, and
+      # relaxed (non-Secure) cookies. Without it the service fail-fasts on required secrets and
+      # ddl-auto=validate against an empty schema — the intended prod-safe posture.
+      SPRING_PROFILES_ACTIVE: dev
       POSTGRES_URL: jdbc:postgresql://postgres:5432/aegis_authz
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
@@ -71,7 +83,11 @@ services:
       # Step-up MFA at login is driven against the mfa-webauthn-service.
       MFA_SERVICE_URL: http://mfa-webauthn-service:9103
       # Secret for the aegis-scim client_credentials client (must match the SCIM service).
-      AEGIS_SCIM_CLIENT_SECRET: scim-dev-only-change-me
+      # L-infra-3: don't rely on the hardcoded dev fallback — generate a per-checkout secret
+      # and put it in compose/.env (auto-loaded, git-ignored), e.g.:
+      #   echo "AEGIS_SCIM_CLIENT_SECRET=$(openssl rand -hex 32)" >> compose/.env
+      # Both the AS and the SCIM service read the same variable, so they stay in sync.
+      AEGIS_SCIM_CLIENT_SECRET: ${AEGIS_SCIM_CLIENT_SECRET:-scim-dev-only-change-me}
     ports:
       - "9000:9000"
     depends_on:
@@ -82,6 +98,7 @@ services:
     build: ../../aegis-identity-service
     image: aegis/identity-service:0.1.0
     environment:
+      SPRING_PROFILES_ACTIVE: dev
       POSTGRES_URL: jdbc:postgresql://postgres:5432/aegis_identity
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
@@ -102,6 +119,7 @@ services:
     build: ../../aegis-tenant-service
     image: aegis/tenant-service:0.1.0
     environment:
+      SPRING_PROFILES_ACTIVE: dev
       POSTGRES_URL: jdbc:postgresql://postgres:5432/aegis_tenant
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
@@ -124,6 +142,7 @@ services:
     build: ../../aegis-social-broker-service
     image: aegis/social-broker-service:0.1.0
     environment:
+      SPRING_PROFILES_ACTIVE: dev
       POSTGRES_URL: jdbc:postgresql://postgres:5432/aegis_social
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
@@ -142,6 +161,7 @@ services:
     build: ../../aegis-mfa-webauthn-service
     image: aegis/mfa-webauthn-service:0.1.0
     environment:
+      SPRING_PROFILES_ACTIVE: dev
       POSTGRES_URL: jdbc:postgresql://postgres:5432/aegis_mfa
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
@@ -166,6 +186,7 @@ services:
     build: ../../aegis-admin-api-service
     image: aegis/admin-api-service:0.1.0
     environment:
+      SPRING_PROFILES_ACTIVE: dev
       POSTGRES_URL: jdbc:postgresql://postgres:5432/aegis_admin
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
@@ -183,6 +204,7 @@ services:
     build: ../../aegis-scim-provisioning-service
     image: aegis/scim-provisioning-service:0.1.0
     environment:
+      SPRING_PROFILES_ACTIVE: dev
       POSTGRES_URL: jdbc:postgresql://postgres:5432/aegis_scim
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
@@ -190,7 +212,7 @@ services:
       AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000,http://localhost:8080,http://edge-gateway:8080
       # SCIM provisions users into identity-service using a client_credentials token from the AS.
       AEGIS_AS_TOKEN_URI: http://authorization-server:9000/oauth2/token
-      AEGIS_SCIM_CLIENT_SECRET: scim-dev-only-change-me
+      AEGIS_SCIM_CLIENT_SECRET: ${AEGIS_SCIM_CLIENT_SECRET:-scim-dev-only-change-me}
       IDENTITY_SERVICE_URL: http://identity-service:9102
       AEGIS_IDENTITY_SERVICE_BASE_URL: http://identity-service:9102
     ports:
@@ -205,6 +227,7 @@ services:
     build: ../../aegis-edge-gateway
     image: aegis/edge-gateway:0.1.0
     environment:
+      SPRING_PROFILES_ACTIVE: dev
       AUTHZ_URI: http://authorization-server:9000
       IDENTITY_URI: http://identity-service:9102
       TENANT_URI: http://tenant-service:9101
@@ -240,6 +263,9 @@ services:
       args:
         # Login is served on localhost (same hostname as the console) so passkeys (rpId=localhost,
         # port-independent) registered in the console also work on the hosted login page.
+        # The console image build rejects http:// origins unless ALLOW_INSECURE_HTTP=true (L-console-1);
+        # local dev uses http on localhost, so opt into the escape hatch here only.
+        ALLOW_INSECURE_HTTP: "true"
         VITE_OIDC_AUTHORITY: http://localhost:9000
         VITE_OIDC_CLIENT_ID: aegis-dev-spa
         VITE_API_BASE: http://localhost:8080

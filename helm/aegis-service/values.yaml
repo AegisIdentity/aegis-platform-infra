@@ -3,6 +3,10 @@
 name: aegis-service
 image:
   repository: ghcr.io/aegis/aegis-service
+  # L-infra-4: `0.1.0` is a mutable tag on GHCR. For prod, digest-pin instead — set an
+  # empty tag and put repository@sha256:<digest> in `repository` (captured from the CI
+  # push), or override `tag` with the immutable digest per release, so a repushed tag
+  # can't swap the running image.
   tag: "0.1.0"
   pullPolicy: IfNotPresent
 
@@ -13,6 +17,17 @@ containerPort: 8080
 serviceAccount:
   create: true
   annotations: {}
+
+# L-infra-4: these workloads don't call the Kubernetes API, so don't mount a SA token by
+# default (reduces blast radius if a pod is compromised). IRSA / Workload Identity inject
+# their own projected token via a separate admission-webhook volume, so pod identity is
+# unaffected. Set true only for a workload that genuinely talks to the API server.
+automountServiceAccountToken: false
+
+# Extra writable mounts/volumes (e.g. nginx cache/run dirs when readOnlyRootFilesystem is
+# on). JVM services need none — /tmp is always mounted by the template.
+extraVolumeMounts: []
+extraVolumes: []
 
 resources:
   requests:
@@ -37,6 +52,21 @@ networkPolicy:
   enabled: true
   # CIDRs/namespaces allowed to call this service's port.
   ingressFrom: []
+  # Egress allowlist (in ADDITION to always-allowed cluster DNS). Empty = DNS-only, the
+  # most restrictive default. Add the destinations this service actually needs — e.g. the
+  # data-tier CIDRs (Postgres/Redis/Kafka) and sibling services — as NetworkPolicyPeer +
+  # ports entries, for example:
+  #   egressTo:
+  #     - to:
+  #         - ipBlock: { cidr: 10.63.16.0/20 }   # data subnet
+  #       ports:
+  #         - { port: 5432, protocol: TCP }
+  #     - to:
+  #         - podSelector:
+  #             matchLabels: { app.kubernetes.io/name: authorization-server }
+  #       ports:
+  #         - { port: 8080, protocol: TCP }
+  egressTo: []
 
 probes:
   path: /actuator/health

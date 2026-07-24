@@ -9,6 +9,10 @@ build/
 .project
 .DS_Store
 *.log
+# Local secrets (e.g. compose/.env holding a per-checkout AEGIS_SCIM_CLIENT_SECRET)
+.env
+*.env
+!example.env
 # terraform
 .terraform/
 *.tfstate

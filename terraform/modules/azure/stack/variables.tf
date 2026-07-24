@@ -34,7 +34,17 @@ variable "kubernetes_version" {
 variable "admin_group_object_ids" {
   type        = list(string)
   default     = []
-  description = "Entra ID groups given cluster admin via Azure RBAC. Non-empty disables local accounts (recommended for stage/prod)."
+  description = "Entra ID groups given cluster admin via Azure RBAC. Non-empty disables the static local admin accounts. REQUIRED (non-empty) for the hardened profile — see validation below."
+
+  # H9: the hardened profile (stage/prod) must not ship with local admin accounts
+  # enabled and no Entra ID RBAC. Empty here leaves local_account_disabled = false,
+  # handing anyone with listClusterAdminCredential a static, non-expiring cluster-admin
+  # kubeconfig for the production identity platform. Cost profile (dev/test) may omit it.
+  # (Cross-variable validation requires Terraform >= 1.9, which the env roots pin.)
+  validation {
+    condition     = var.profile != "hardened" || length(var.admin_group_object_ids) > 0
+    error_message = "admin_group_object_ids must be non-empty for the hardened profile (stage/prod): supply the Entra ID group object IDs that get Azure RBAC cluster admin."
+  }
 }
 
 variable "workload_namespace" {

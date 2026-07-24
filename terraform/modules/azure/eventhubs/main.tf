@@ -12,6 +12,11 @@ resource "azurerm_eventhub_namespace" "this" {
 
   public_network_access_enabled = var.public_network_access
   minimum_tls_version           = "1.2"
+
+  # L-infra-6: disable SAS-key (shared access signature) auth entirely — workloads
+  # authenticate to Event Hubs with Entra ID Workload Identity (same federation the rest
+  # of the platform uses), so there are no long-lived namespace connection strings to leak.
+  local_authentication_enabled = false
 }
 
 resource "azurerm_private_endpoint" "this" {

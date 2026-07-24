@@ -37,6 +37,7 @@ locals {
       kv_default_action     = "Allow"
       private_endpoints     = false
       public_network_access = true
+      enable_audit          = false
     }
     hardened = {
       aks_sku_tier          = "Standard"
@@ -66,6 +67,7 @@ locals {
       kv_default_action     = "Deny"
       private_endpoints     = true
       public_network_access = false
+      enable_audit          = true
     }
   }
 
@@ -239,4 +241,23 @@ module "wi_authorization_server" {
   role_assignments = [
     { scope = module.keyvault.id, role = "Key Vault Crypto Officer" }
   ]
+}
+
+# Account-level detection & audit (M-infra-4): Log Analytics + diagnostic settings for
+# AKS/Key Vault/ACR/Postgres (notably Key Vault audit logging — it holds the tenant signing
+# keys) + Microsoft Defender for Cloud plans. Hardened profile only. See modules/azure/audit
+# for operator prerequisites (Defender is subscription-scoped — omit if managed centrally).
+module "audit" {
+  count  = local.p.enable_audit ? 1 : 0
+  source = "../audit"
+
+  name                = local.name
+  resource_group_name = azurerm_resource_group.this.name
+  location            = azurerm_resource_group.this.location
+  retention_in_days   = 365
+
+  aks_id             = module.aks.id
+  key_vault_id       = module.keyvault.id
+  acr_id             = module.acr.id
+  postgres_server_id = module.postgres.server_id
 }

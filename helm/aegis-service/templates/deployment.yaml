@@ -48,10 +48,19 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          # readOnlyRootFilesystem requires a writable /tmp for the JVM.
+          # readOnlyRootFilesystem requires a writable /tmp for the JVM. Additional
+          # writable paths (e.g. nginx cache/run for the unprivileged frontend image)
+          # come from .Values.extraVolumeMounts / .Values.extraVolumes.
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      automountServiceAccountToken: {{ .Values.automountServiceAccountToken }}
