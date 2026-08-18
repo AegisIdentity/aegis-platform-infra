@@ -256,6 +256,8 @@ services:
     image: aegis/edge-gateway:0.1.0
     environment:
       SPRING_PROFILES_ACTIVE: dev
+      # Edge publishes forged-host rejections onto the platform audit stream.
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       AUTHZ_URI: http://authorization-server:9000
       IDENTITY_URI: http://identity-service:9102
       TENANT_URI: http://tenant-service:9101
