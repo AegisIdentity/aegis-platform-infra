@@ -47,6 +47,24 @@ env:
   SPRING_DATA_REDIS_PORT: "6379"
   SPRING_DATA_REDIS_SSL_ENABLED: "true"
 
+  # Audit event stream (CloudTrail-style). Every service publishes security events here; the
+  # admin-api sink consumes them into the append-only System Log store. Point at the managed broker
+  # (MSK / Event Hubs Kafka endpoint). Unset = the service logs audit events but does not stream them.
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: aegis-kafka-bootstrap:9092
+
+  # Tenant signing-key encryption (ADR-0007). Two postures:
+  #  * KMS envelope (strongest): set AEGIS_CRYPTO_KMS_ENABLED=true and provide the CMK id + the
+  #    KMS-wrapped data-key blob below. The data key is unwrapped from the CMK at startup; the CMK
+  #    never leaves KMS, and the pod needs only kms:Decrypt (via IRSA). The wrapped blob is created
+  #    once per environment: `aws kms encrypt --key-id <cmk> --plaintext <32-random-bytes>`.
+  #  * Secret-manager key: leave KMS off and supply AEGIS_FIELD_ENC_KEY (base64 AES-256) from the
+  #    secret store. A valid interim posture.
+  # The service FAILS to start with neither, outside the dev profile (fail-closed).
+  AEGIS_CRYPTO_KMS_ENABLED: "false"
+  # AEGIS_CRYPTO_KMS_KEY_ID: alias/aegis-tenant-keys      # the CMK
+  # AEGIS_CRYPTO_KMS_REGION: us-east-1
+  # AEGIS_CRYPTO_KMS_WRAPPED_DATA_KEY: <base64 KMS ciphertext blob>   # from a secret, not inline
+
   # Public per-tenant issuer base — the edge gateway hostname, NOT this pod. Tenant apps validate
   # minted tokens via OIDC discovery against <base>/<tenant>.
   AEGIS_PUBLIC_ISSUER_BASE: https://login.aegis.io
