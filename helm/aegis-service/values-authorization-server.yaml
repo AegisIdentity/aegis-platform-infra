@@ -1,0 +1,94 @@
+# Authorization server.
+#   helm install authorization-server helm/aegis-service -f helm/aegis-service/values-authorization-server.yaml
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# The generic chart defaults to replicaCount 2 with an HPA to 8 behind an affinity-free ClusterIP
+# Service. That was previously incompatible with this service, which kept three pieces of state in
+# process memory — per-tenant signing keys, the interactive login session, and short-lived
+# interaction codes. With more than one replica, each pod minted a *different* signing key per
+# tenant (so a token signed by one pod failed validation against another pod's JWKS) and a login
+# begun on one pod broke on the next request.
+#
+# All three are now externalised:
+#   * signing keys  -> PostgreSQL, encrypted at rest  (table tenant_signing_key)
+#   * login session -> Redis via Spring Session        (SPRING_SESSION_STORE_TYPE=redis)
+#   * interaction codes -> Redis, redeemed with GETDEL (atomic single-use across replicas)
+#
+# So multiple replicas are correct NOW — but only when the Redis settings below are actually
+# supplied. Deploying this service at >1 replica WITHOUT Redis reintroduces the original defect.
+
+name: authorization-server
+
+image:
+  repository: ghcr.io/aegis/aegis-authorization-server
+  tag: "0.1.0"
+
+containerPort: 9000
+
+# Safe because all three state stores are external — see the header.
+replicaCount: 2
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+
+env:
+  SPRING_PROFILES_ACTIVE: prod
+
+  # REQUIRED — the service does not start without a reachable Redis. Point at the managed cache
+  # (ElastiCache / Azure Cache for Redis). This is deliberately fail-fast rather than a silent
+  # in-memory fallback: a fallback would turn a missing Redis into intermittent broken logins that
+  # only appear once a second replica exists.
+  # NB: Boot 4 removed spring.session.store-type and ships no session-store auto-configuration, so
+  # Redis sessions are enabled in code (session/RedisSessionConfig); these settings make them work.
+  SPRING_DATA_REDIS_HOST: aegis-redis
+  SPRING_DATA_REDIS_PORT: "6379"
+  SPRING_DATA_REDIS_SSL_ENABLED: "true"
+
+  # Public per-tenant issuer base — the edge gateway hostname, NOT this pod. Tenant apps validate
+  # minted tokens via OIDC discovery against <base>/<tenant>.
+  AEGIS_PUBLIC_ISSUER_BASE: https://login.aegis.io
+
+  # In-network issuer stamped on the AS's own service tokens.
+  AEGIS_ISSUER: https://authorization-server.aegis.svc.cluster.local:9000
+
+  IDENTITY_SERVICE_URL: https://identity-service.aegis.svc.cluster.local:9102
+  SOCIAL_BROKER_URL: https://social-broker-service.aegis.svc.cluster.local:9105
+  MFA_SERVICE_URL: https://mfa-webauthn-service.aegis.svc.cluster.local:9103
+
+# SECRETS — supplied from the cloud secret store via CSI driver / external-secrets, never here:
+#   POSTGRES_PASSWORD        database credential
+#   SPRING_DATA_REDIS_PASSWORD  cache AUTH token
+#   AEGIS_FIELD_ENC_KEY      base64 AES-256 key that protects tenant signing keys at rest.
+#                            The service FAILS TO START without it outside the dev profile — a
+#                            deliberate fail-closed choice, since the alternative is protecting
+#                            production signing keys with a value published in source control.
+#                            Losing this key makes every stored tenant key undecryptable, so it
+#                            must be backed up and rotated with a re-encryption pass, not replaced.
+
+# This service reaches Postgres, Redis, and three sibling services. The chart's default egress is
+# DNS-only, so these MUST be populated or all of that traffic is denied at deploy time.
+networkPolicy:
+  enabled: true
+  ingressFrom: []
+  egressTo: []
+    # - to:
+    #     - ipBlock: { cidr: 10.63.16.0/20 }      # data subnet: Postgres + Redis
+    #   ports:
+    #     - { port: 5432, protocol: TCP }
+    #     - { port: 6379, protocol: TCP }
+    # - to:
+    #     - podSelector:
+    #         matchLabels: { app.kubernetes.io/name: identity-service }
+    #   ports:
+    #     - { port: 9102, protocol: TCP }
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 768Mi
+  limits:
+    cpu: "2"
+    memory: 1536Mi

@@ -88,10 +88,22 @@ services:
       #   echo "AEGIS_SCIM_CLIENT_SECRET=$(openssl rand -hex 32)" >> compose/.env
       # Both the AS and the SCIM service read the same variable, so they stay in sync.
       AEGIS_SCIM_CLIENT_SECRET: ${AEGIS_SCIM_CLIENT_SECRET:-scim-dev-only-change-me}
+      # Secret for the aegis-gateway client_credentials client (scope: tenant:resolve only).
+      # Must match the edge-gateway's value below.
+      AEGIS_GATEWAY_CLIENT_SECRET: ${AEGIS_GATEWAY_CLIENT_SECRET:-gateway-dev-only-change-me}
+      # The AS is the one stateful service: interactive login sessions and short-lived interaction
+      # codes. Both go to Redis so any replica can serve any request — without this the service
+      # cannot be scaled past one instance (see aegis-authorization-server CLAUDE.md).
+      SPRING_DATA_REDIS_HOST: redis
+      # The compose Redis enforces AUTH (M-infra-6), so the client must present the password.
+      SPRING_DATA_REDIS_PASSWORD: dev-only-change-me
+      # (Boot 4 has no spring.session.store-type; the store is enabled in code by RedisSessionConfig.)
     ports:
       - "9000:9000"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   identity-service:
@@ -235,6 +247,15 @@ services:
       MFA_URI: http://mfa-webauthn-service:9103
       ADMIN_API_URI: http://admin-api-service:9107
       SCIM_URI: http://scim-provisioning-service:9106
+      # Host -> tenant resolution via tenant-service, so white-label custom sign-in domains
+      # (login.acme.com) resolve. Without it the tenant is guessed from the first DNS label.
+      AEGIS_TENANT_RESOLUTION_ENABLED: "true"
+      AEGIS_GATEWAY_CLIENT_SECRET: ${AEGIS_GATEWAY_CLIENT_SECRET:-gateway-dev-only-change-me}
+      # M-edge-4: without this the allowlist is EMPTY and a forged Host drives tenant/issuer
+      # resolution — a request with Host: evil.example makes the AS advertise
+      # issuer=http://evil.example/<tenant>. Pin the hosts the local stack actually uses so the
+      # shipped stack is not vulnerable by default; prod sets its real gateway + tenant domains.
+      AEGIS_ALLOWED_HOSTS: ${AEGIS_ALLOWED_HOSTS:-localhost,127.0.0.1,edge-gateway}
     ports:
       - "8080:8080"
     depends_on:
@@ -271,7 +292,8 @@ services:
         VITE_API_BASE: http://localhost:8080
     image: aegis/admin-console:0.1.0
     ports:
-      - "3000:80"
+      # Unprivileged nginx listens on 8080 inside the container (not 80) — see nginx.conf / Dockerfile.
+      - "3000:8080"
     depends_on:
       edge-gateway:
         condition: service_started
