@@ -235,6 +235,8 @@ services:
       SPRING_PROFILES_ACTIVE: dev
       # Audit event stream (CloudTrail-style): every service publishes security events to Kafka.
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # Consume identity.user.created -> outbound provisioning task.
+      AEGIS_IDENTITY_CONSUMER_ENABLED: "true"
       POSTGRES_URL: jdbc:postgresql://postgres:5432/aegis_scim
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
