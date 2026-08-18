@@ -71,6 +71,8 @@ services:
       SPRING_PROFILES_ACTIVE: dev
       # Audit event stream (CloudTrail-style): every service publishes security events to Kafka.
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # Consume tenant lifecycle events -> eagerly provision the new tenant's signing key.
+      AEGIS_TENANT_CONSUMER_ENABLED: "true"
       POSTGRES_URL: jdbc:postgresql://postgres:5432/aegis_authz
       POSTGRES_USER: aegis
       POSTGRES_PASSWORD: dev-only-change-me
