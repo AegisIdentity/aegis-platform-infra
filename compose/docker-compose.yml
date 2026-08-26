@@ -156,6 +156,20 @@ services:
       # relaxed (non-Secure) cookies. Without it the service fail-fasts on required secrets and
       # ddl-auto=validate against an empty schema — the intended prod-safe posture.
       SPRING_PROFILES_ACTIVE: dev
+      # --- Vault-backed token signing (ADR-0015) -------------------------------------------------
+      # ON here so the local stack really exercises the path where the private key NEVER enters this
+      # process: the AS sends the signing input to Vault Transit and gets a signature back. Transit
+      # keys are created exportable=false, so there is nothing to extract even if the AS is fully
+      # compromised — a strict improvement on the KMS scheme, where the key was unwrapped into memory.
+      #
+      # The token is read from a FILE and carries the scoped `aegis-platform` policy: not root, and
+      # not an env var (which would leak into `docker inspect`, process listings and crash dumps).
+      AEGIS_VAULT_ENABLED: "true"
+      AEGIS_VAULT_SIGNING_ENABLED: "true"
+      AEGIS_VAULT_URI: http://vault-0:8200
+      AEGIS_VAULT_TOKEN_FILE: /vault/bootstrap/platform-token
+      AEGIS_VAULT_MOUNT: aegis
+      AEGIS_VAULT_ISOLATION: PATH
       # Audit event stream (CloudTrail-style): every service publishes security events to Kafka.
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       # Consume tenant lifecycle events -> eagerly provision the new tenant's signing key.
@@ -189,11 +203,15 @@ services:
       # The compose Redis enforces AUTH (M-infra-6), so the client must present the password.
       SPRING_DATA_REDIS_PASSWORD: dev-only-change-me
       # (Boot 4 has no spring.session.store-type; the store is enabled in code by RedisSessionConfig.)
+    volumes:
+      - vaultbootstrap:/vault/bootstrap:ro
     ports:
       - "9000:9000"
     depends_on:
       postgres:
         condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
 

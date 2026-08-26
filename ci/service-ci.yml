@@ -19,6 +19,22 @@ permissions:
   packages: read
 
 jobs:
+  # Runs FIRST and gates everything else. The patent disclosure of 2026-08-18 happened because a
+  # file marked confidential was committed to a public repository; a marking in the file text stops
+  # nothing. This is the control that actually does.
+  confidential-material:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Refuse confidential material in a public repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsSL -o check-confidential.sh \
+            "https://raw.githubusercontent.com/${{ github.repository_owner }}/aegis-platform-infra/main/scripts/check-confidential.sh"
+          chmod +x check-confidential.sh
+          ./check-confidential.sh .
+
   build-test:
     runs-on: ubuntu-latest # GitHub-hosted runners provide a Docker daemon for Testcontainers
     steps:

@@ -75,7 +75,7 @@ vault secrets enable -path=aegis/pki pki          2>/dev/null || echo "  pki alr
 # One shared mount per engine. Transit key names cannot contain "/", so the tenant is a NAME PREFIX;
 # a mount per tenant would cap tenant count at Vault's ~14k mount limit and slow leadership transfer.
 # KV does support nesting, so there the tenant is a path segment.
-for tenant in dev acme globex; do
+for tenant in default dev acme globex; do
   echo "[bootstrap] provisioning tenant $tenant"
 
   # exportable=false is not negotiable: an exportable key defeats the reason for using transit.
