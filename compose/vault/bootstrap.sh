@@ -49,11 +49,16 @@ for tenant in dev acme globex; do
   # A tenant may manage its OWN keys but must never touch the key Aegis uses to sign that tenant's
   # tokens — same namespace, policy-fenced apart.
   vault policy write "aegis-tenant-${tenant}" - <<POLICY >/dev/null
-path "aegis/transit/keys/${tenant}-tenant-managed/*" { capabilities = ["create","read","update","list"] }
-path "aegis/transit/sign/${tenant}-tenant-managed/*"  { capabilities = ["update"] }
-path "aegis/transit/verify/${tenant}-tenant-managed/*" { capabilities = ["update"] }
-path "aegis/kv/data/${tenant}/*"                      { capabilities = ["create","read","update","delete","list"] }
-path "aegis/transit/keys/${tenant}-token-signing"     { capabilities = ["deny"] }
+# Transit key names cannot contain "/", so the tenant is a NAME PREFIX inside one shared mount.
+# A mount per tenant would cap tenant count at Vault's ~14k mount limit and slow leadership transfer.
+path "aegis/transit/keys/${tenant}-tenant-managed-*"   { capabilities = ["create","read","update","list"] }
+path "aegis/transit/sign/${tenant}-tenant-managed-*"   { capabilities = ["update"] }
+path "aegis/transit/verify/${tenant}-tenant-managed-*" { capabilities = ["update"] }
+# KV v2 does support nesting, so there the tenant is a path segment.
+path "aegis/kv/data/${tenant}/*"                       { capabilities = ["create","read","update","delete","list"] }
+# The tenant may manage its OWN keys but never the key Aegis uses to sign that tenant's tokens.
+path "aegis/transit/keys/${tenant}-token-signing"      { capabilities = ["deny"] }
+path "aegis/transit/sign/${tenant}-token-signing"      { capabilities = ["deny"] }
 POLICY
 done
 
