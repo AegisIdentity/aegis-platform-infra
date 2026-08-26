@@ -42,6 +42,84 @@ services:
       timeout: 3s
       retries: 20
 
+  # ---------------------------------------------------------------------------------------------
+  # HashiCorp Vault — 3-node integrated-storage (Raft) HA cluster (ADR-0015 / ADR-0016).
+  #
+  # Three nodes locally rather than one, deliberately. Vault is now a TIER-0 dependency on the token
+  # path (it holds every tenant's signing key and the private material never leaves it), so a
+  # single-node dev topology would stop predicting production behaviour exactly where that matters
+  # most. Leader election, retry_join and follower reads all get exercised on a laptop.
+  #
+  # M-infra-6: bound to loopback like every other datastore here — never LAN-reachable.
+  # ---------------------------------------------------------------------------------------------
+  vault-0:
+    image: hashicorp/vault:1.18
+    command: ["vault", "server", "-config=/vault/config/vault-0.hcl"]
+    cap_add: ["IPC_LOCK"]
+    environment:
+      VAULT_ADDR: http://127.0.0.1:8200
+    ports:
+      - "127.0.0.1:8200:8200"
+    volumes:
+      - ./vault/vault-0.hcl:/vault/config/vault-0.hcl:ro
+      - vault0data:/vault/data
+    healthcheck:
+      # 501 = not initialized, 503 = sealed. Both mean "up but not ready", which is exactly the
+      # state the bootstrap container needs to find it in, so they count as healthy here.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8200/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  vault-1:
+    image: hashicorp/vault:1.18
+    command: ["vault", "server", "-config=/vault/config/vault-1.hcl"]
+    cap_add: ["IPC_LOCK"]
+    environment:
+      VAULT_ADDR: http://127.0.0.1:8200
+    ports:
+      - "127.0.0.1:8201:8200"
+    volumes:
+      - ./vault/vault-1.hcl:/vault/config/vault-1.hcl:ro
+      - vault1data:/vault/data
+    depends_on:
+      vault-0:
+        condition: service_healthy
+
+  vault-2:
+    image: hashicorp/vault:1.18
+    command: ["vault", "server", "-config=/vault/config/vault-2.hcl"]
+    cap_add: ["IPC_LOCK"]
+    environment:
+      VAULT_ADDR: http://127.0.0.1:8200
+    ports:
+      - "127.0.0.1:8202:8200"
+    volumes:
+      - ./vault/vault-2.hcl:/vault/config/vault-2.hcl:ro
+      - vault2data:/vault/data
+    depends_on:
+      vault-0:
+        condition: service_healthy
+
+  # One-shot: initialize + unseal the cluster, enable transit/kv-v2/pki under the aegis/ mount, and
+  # seed per-tenant keys and policies. DEV ONLY — it writes unseal keys to a volume so that
+  # `docker compose up` is a single command. Deployed environments auto-unseal via cloud KMS and
+  # revoke the root token immediately after bootstrap.
+  vault-init:
+    image: hashicorp/vault:1.18
+    entrypoint: ["/bin/sh", "/vault/bootstrap/bootstrap.sh"]
+    volumes:
+      - ./vault/bootstrap.sh:/vault/bootstrap/bootstrap.sh:ro
+      - vaultbootstrap:/vault/bootstrap
+    depends_on:
+      vault-0:
+        condition: service_healthy
+      vault-1:
+        condition: service_started
+      vault-2:
+        condition: service_started
+    restart: on-failure
+
   # Single-node Kafka (KRaft). Part of the platform's event backbone; the current core services
   # do not yet publish to it, so nothing depends on it — it is here for the next iteration.
   kafka:
@@ -322,3 +400,7 @@ services:
 
 volumes:
   pgdata:
+  vault0data:
+  vault1data:
+  vault2data:
+  vaultbootstrap:

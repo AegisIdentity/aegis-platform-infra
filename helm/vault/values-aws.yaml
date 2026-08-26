@@ -1,0 +1,89 @@
+# Aegis — HashiCorp Vault on EKS. Use with the official chart:
+#   helm repo add hashicorp https://helm.releases.hashicorp.com
+#   helm upgrade --install vault hashicorp/vault -n aegis -f values-aws.yaml
+#
+# ADR-0015/0016. Vault is a TIER-0 dependency on the token path — it holds every tenant's signing key
+# and the private material never leaves it — so this is an HA Raft cluster, never a single node.
+#
+# Cloud KMS is DEMOTED here: it auto-unseals Vault at startup and nothing more. It no longer sits on
+# the request path, so a KMS outage after unseal does not stop token signing.
+global:
+  tlsDisable: false
+
+injector:
+  # Not used: services talk to Vault through aegis-vault-commons over the API, not via sidecar
+  # injection. Fewer moving parts on the token path.
+  enabled: false
+
+server:
+  image:
+    repository: hashicorp/vault
+    tag: "1.18"
+
+  # Auto-unseal role assumed via IRSA — see terraform/modules/aws/vault-unseal.
+  serviceAccount:
+    create: true
+    annotations:
+      eks.amazonaws.com/role-arn: "REPLACE_WITH_VAULT_UNSEAL_ROLE_ARN"
+
+  ha:
+    enabled: true
+    replicas: 3
+    raft:
+      enabled: true
+      setNodeId: true
+      config: |
+        ui = true
+
+        listener "tcp" {
+          address       = "[::]:8200"
+          cluster_address = "[::]:8201"
+          tls_cert_file = "/vault/userconfig/vault-tls/tls.crt"
+          tls_key_file  = "/vault/userconfig/vault-tls/tls.key"
+        }
+
+        storage "raft" {
+          path = "/vault/data"
+          retry_join { leader_api_addr = "https://vault-0.vault-internal:8200" }
+          retry_join { leader_api_addr = "https://vault-1.vault-internal:8200" }
+          retry_join { leader_api_addr = "https://vault-2.vault-internal:8200" }
+        }
+
+        # The only remaining role for cloud KMS under ADR-0015.
+        seal "awskms" {
+          region     = "REPLACE_WITH_REGION"
+          kms_key_id = "REPLACE_WITH_KMS_KEY_ID"
+        }
+
+        service_registration "kubernetes" {}
+
+  dataStorage:
+    enabled: true
+    size: 10Gi
+    storageClass: gp3
+
+  extraVolumes:
+    - type: secret
+      name: vault-tls
+
+  # Vault is on the token path: an under-resourced Vault degrades every login in the platform.
+  resources:
+    requests: { memory: 512Mi, cpu: 250m }
+    limits:   { memory: 1Gi,   cpu: 1000m }
+
+  affinity: |
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: vault
+          topologyKey: kubernetes.io/hostname
+
+  # Raft snapshots to S3. Losing the Raft log means losing every tenant signing key, which is not a
+  # recoverable event — the keys exist nowhere else by design.
+  extraEnvironmentVars:
+    VAULT_CLUSTER_ADDR: "https://$(HOSTNAME).vault-internal:8201"
+
+ui:
+  enabled: true
+  serviceType: ClusterIP   # never a LoadBalancer: the UI is an operator tool, not a public surface
