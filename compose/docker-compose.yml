@@ -62,7 +62,10 @@ services:
       - "127.0.0.1:8200:8200"
     volumes:
       - ./vault/vault-0.hcl:/vault/config/vault-0.hcl:ro
-      - vault0data:/vault/data
+      # Mounted at /vault/file, not /vault/data: the image pre-creates /vault/file owned by
+      # the 'vault' user, whereas a fresh named volume on a path the image does not create is
+      # root-owned and Vault (running non-root) cannot open its bolt file.
+      - vault0data:/vault/file
     healthcheck:
       # 501 = not initialized, 503 = sealed. Both mean "up but not ready", which is exactly the
       # state the bootstrap container needs to find it in, so they count as healthy here.
@@ -81,7 +84,10 @@ services:
       - "127.0.0.1:8201:8200"
     volumes:
       - ./vault/vault-1.hcl:/vault/config/vault-1.hcl:ro
-      - vault1data:/vault/data
+      # Mounted at /vault/file, not /vault/data: the image pre-creates /vault/file owned by
+      # the 'vault' user, whereas a fresh named volume on a path the image does not create is
+      # root-owned and Vault (running non-root) cannot open its bolt file.
+      - vault1data:/vault/file
     depends_on:
       vault-0:
         condition: service_healthy
@@ -96,7 +102,10 @@ services:
       - "127.0.0.1:8202:8200"
     volumes:
       - ./vault/vault-2.hcl:/vault/config/vault-2.hcl:ro
-      - vault2data:/vault/data
+      # Mounted at /vault/file, not /vault/data: the image pre-creates /vault/file owned by
+      # the 'vault' user, whereas a fresh named volume on a path the image does not create is
+      # root-owned and Vault (running non-root) cannot open its bolt file.
+      - vault2data:/vault/file
     depends_on:
       vault-0:
         condition: service_healthy
@@ -289,6 +298,14 @@ services:
     image: aegis/admin-api-service:0.1.0
     environment:
       SPRING_PROFILES_ACTIVE: dev
+      # Tenant-facing Key/Secrets Management (ADR-0016). The token is read from a FILE on the shared
+      # bootstrap volume, not an env var, and it carries the scoped `aegis-platform` policy rather
+      # than root — so a compromised admin-api cannot seal the cluster or rewrite policies.
+      AEGIS_VAULT_ENABLED: "true"
+      AEGIS_VAULT_URI: http://vault-0:8200
+      AEGIS_VAULT_TOKEN_FILE: /vault/bootstrap/platform-token
+      AEGIS_VAULT_MOUNT: aegis
+      AEGIS_VAULT_ISOLATION: PATH
       # Audit event stream (CloudTrail-style): every service publishes security events to Kafka.
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       # admin-api is the audit SINK: it consumes the stream into the append-only System Log store.
@@ -298,11 +315,15 @@ services:
       POSTGRES_PASSWORD: dev-only-change-me
       AEGIS_JWKS_URI: http://authorization-server:9000/internal/jwks
       AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000,http://localhost:8080,http://edge-gateway:8080
+    volumes:
+      - vaultbootstrap:/vault/bootstrap:ro
     ports:
       - "9107:9107"
     depends_on:
       postgres:
         condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
       authorization-server:
         condition: service_healthy
 
@@ -333,6 +354,91 @@ services:
       authorization-server:
         condition: service_healthy
 
+  # ---------------------------------------------------------------------------------------------
+  # Agent identity services (added 2026-08-26).
+  # ---------------------------------------------------------------------------------------------
+
+  # System of record for agents, content-addressed tools, MCP servers and A2A agent cards.
+  agent-registry-service:
+    build: ../../aegis-agent-registry-service
+    image: aegis/agent-registry-service:0.1.0
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/aegis_agent_registry
+      POSTGRES_USER: aegis
+      POSTGRES_PASSWORD: dev-only-change-me
+      AEGIS_JWKS_URI: http://authorization-server:9000/internal/jwks
+      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000,http://localhost:8080,http://edge-gateway:8080
+    ports:
+      - "9108:9108"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      authorization-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9108/actuator/health | grep -q UP || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+
+  # Behavioural detection. Consumes the audit stream ASYNCHRONOUSLY - never on the token path
+  # (ADR-0014) - and keeps agent sessions in Redis so it is not pinned to a single replica.
+  threat-analysis-service:
+    build: ../../aegis-threat-analysis-service
+    image: aegis/threat-analysis-service:0.1.0
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # Without this the Kafka listener never starts and nothing is ever scored.
+      AEGIS_AUDIT_CONSUMER_ENABLED: "true"
+      AEGIS_THREAT_SESSION_SHARED: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: dev-only-change-me
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/aegis_threat
+      POSTGRES_USER: aegis
+      POSTGRES_PASSWORD: dev-only-change-me
+      AEGIS_JWKS_URI: http://authorization-server:9000/internal/jwks
+      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000,http://localhost:8080,http://edge-gateway:8080
+    ports:
+      - "9109:9109"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      authorization-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9109/actuator/health | grep -q UP || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+
+  # SAML 2.0 IdP. Present so `docker compose up` really does bring up every service.
+  saml-idp-service:
+    build: ../../aegis-saml-idp-service
+    image: aegis/saml-idp-service:0.1.0
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/aegis_saml
+      POSTGRES_USER: aegis
+      POSTGRES_PASSWORD: dev-only-change-me
+      AEGIS_JWKS_URI: http://authorization-server:9000/internal/jwks
+      AEGIS_ACCEPTED_ISSUERS: http://localhost:9000,http://authorization-server:9000,http://localhost:8080,http://edge-gateway:8080
+    ports:
+      - "9104:9104"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      authorization-server:
+        condition: service_healthy
+
   edge-gateway:
     build: ../../aegis-edge-gateway
     image: aegis/edge-gateway:0.1.0
@@ -347,6 +453,8 @@ services:
       MFA_URI: http://mfa-webauthn-service:9103
       ADMIN_API_URI: http://admin-api-service:9107
       SCIM_URI: http://scim-provisioning-service:9106
+      AGENT_REGISTRY_URI: http://agent-registry-service:9108
+      THREAT_ANALYSIS_URI: http://threat-analysis-service:9109
       # Host -> tenant resolution via tenant-service, so white-label custom sign-in domains
       # (login.acme.com) resolve. Without it the tenant is guessed from the first DNS label.
       AEGIS_TENANT_RESOLUTION_ENABLED: "true"
@@ -372,6 +480,10 @@ services:
       admin-api-service:
         condition: service_started
       scim-provisioning-service:
+        condition: service_started
+      agent-registry-service:
+        condition: service_started
+      threat-analysis-service:
         condition: service_started
 
   # Okta-style front-end (admin console + end-user portal + branded sign-in). Static SPA served by

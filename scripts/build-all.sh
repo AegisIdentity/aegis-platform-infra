@@ -19,9 +19,15 @@ mvn_cmd -f aegis-platform-commons/pom.xml install
 echo "==> 3/3 service fat jars"
 for svc in aegis-authorization-server aegis-identity-service aegis-tenant-service \
            aegis-edge-gateway aegis-mfa-webauthn-service aegis-saml-idp-service \
-           aegis-social-broker-service aegis-scim-provisioning-service aegis-admin-api-service; do
+           aegis-social-broker-service aegis-scim-provisioning-service aegis-admin-api-service \
+           aegis-agent-registry-service aegis-threat-analysis-service; do
   echo "    - $svc"
-  mvn_cmd -f "$svc/pom.xml" -DskipTests package
+  # `clean` matters: `package` alone considers a module up to date when only a DEPENDENCY changed,
+  # so a rebuilt commons jar silently does not reach the service fat jar — and the stale jar then
+  # fails at runtime with an error that points at the wrong place entirely.
+  mvn_cmd -f "$svc/pom.xml" -DskipTests clean package
 done
 
-echo "==> done. Now: (cd aegis-platform-infra/compose && docker compose up --build)"
+echo "==> done."
+echo "    next: (cd aegis-platform-infra/compose && docker compose up -d)"
+echo "    then: aegis-platform-infra/scripts/e2e-agent-flow.sh"

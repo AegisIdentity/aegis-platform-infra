@@ -9,3 +9,6 @@ CREATE DATABASE aegis_saml;
 CREATE DATABASE aegis_social;
 CREATE DATABASE aegis_scim;
 CREATE DATABASE aegis_admin;
+-- Agent identity (added 2026-08-26).
+CREATE DATABASE aegis_agent_registry;
+CREATE DATABASE aegis_threat;

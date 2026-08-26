@@ -7,7 +7,7 @@ ui = true
 disable_mlock = true
 
 storage "raft" {
-  path    = "/vault/data"
+  path    = "/vault/file"
   node_id = "vault-2"
 
   retry_join { leader_api_addr = "http://vault-0:8200" }
